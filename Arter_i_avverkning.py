@@ -11,13 +11,15 @@ def get_config():
             dict: En dictionary innehållande sökvägar (Path), kolumnnamn (list), 
                 och koordinatsystem (str).
     """
-    root = Path(r"C:\Users\Asus\Documents\Git repos\Arter_i_avverkning")
-    processed_dir = root / "processed"
+    root = Path(r".")
+    processed_dir = root / "out_data"
+    indata_dir = root / "in_data"
+    
     processed_dir.mkdir(parents=True, exist_ok=True)
     
     return {
-        "input_dir": root,
-        "map_dir": root,
+        "input_dir": indata_dir,
+        "map_dir": indata_dir,
         "cache_obs": processed_dir / "Art_cache.parquet",
         "cache_layers": {
             "utford": processed_dir / "utford_cache.parquet",
@@ -122,12 +124,12 @@ def load_filtered_logging(cfg, bbox, start_year):
     """
     logging_data = {}
     
-    for key, filename in cfg["layers"].items(): # utförd och anmäld
-        cache_path = cfg["cache_layers"][key]
+    for layer, filename in cfg["layers"].items(): # utförd och anmäld
+        cache_path = cfg["cache_layers"][layer]
         
         # Om vi laddar från cache, har vi redan filtrerat (eller så filtrerar vi igen för säkerhets skull)
         if cache_path.exists():
-            print(f"[Cache] Laddar {key}...")
+            print(f"[Cache] Laddar {layer}...")
             gdf = gpd.read_parquet(cache_path)
         else:
             path = cfg["map_dir"] / filename
@@ -136,7 +138,7 @@ def load_filtered_logging(cfg, bbox, start_year):
             if gdf.crs != cfg["crs"]:
                 gdf = gdf.to_crs(cfg["crs"])
 
-        date_col = 'Avvdatum' if key == 'utford' else 'Inkomdatum'    # --- FILTRERING PÅ TID ---
+        date_col = 'Avvdatum' if layer == 'utford' else 'Inkomdatum'    # --- FILTRERING PÅ TID ---
         
         if date_col in gdf.columns:
             before_count = len(gdf)
@@ -146,13 +148,13 @@ def load_filtered_logging(cfg, bbox, start_year):
             
             diff = before_count - len(gdf)
             if diff > 0:
-                print(f" -> Tog bort {diff} st {key} avverkningar från före år {start_year}")
+                print(f" -> Tog bort {diff} st {layer} avverkningar från före år {start_year}")
 
         # Spara till cache 
         if not cache_path.exists():
             gdf.to_parquet(cache_path)
             
-        logging_data[key] = gdf
+        logging_data[layer] = gdf
         
     return logging_data
 
@@ -204,6 +206,7 @@ def run_spatial_analysis(gdf_obs, logging_data):
         }
         
     return results
+
 
 
 def describe_and_save(gdf_obs, results, logging_data, cfg):

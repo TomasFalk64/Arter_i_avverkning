@@ -1,20 +1,8 @@
-# Exkludera alla Excel-filer
-*.xlsx
-*.xls
-*.csv
-
 # Exkludera tunga GIS-filer och mappar
 Kartor/
-processed/
 kalk_artobs/
-*.shp
-*.dbf
-*.prj
-*.shx
-*.cpg
-*.gpkg
-*.geojson
-*.png
+in_data/
+out_data/
 
 # Python-skräp
 __pycache__/
