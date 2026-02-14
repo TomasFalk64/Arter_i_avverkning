@@ -3,8 +3,14 @@ import geopandas as gpd
 from pathlib import Path
 import sys
 
-# --- 1. CONFIGURATION ---
 def get_config():
+    """
+        Initierar projektets inställningar.
+        
+        Returns:
+            dict: En dictionary innehållande sökvägar (Path), kolumnnamn (list), 
+                och koordinatsystem (str).
+    """
     root = Path(r"C:\Users\Asus\Documents\Git repos\Arter_i_avverkning")
     processed_dir = root / "processed"
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -31,9 +37,19 @@ def get_config():
         "crs": "EPSG:3006"
     }
 
-# --- 2. INLÄSNINGSDEL ---
+
 def load_observations(cfg):
-    """Läser Excel eller laddar från Parquet-cache."""
+    """
+    Läser in och tvättar artdata från Excel eller Parquet-cache.
+    
+    Args:
+        cfg (dict): Konfigurations-dictionary från get_config().
+        
+    Returns:
+        gpd.GeoDataFrame: En GeoDataFrame med punktgeometri (SWEREF99 TM) 
+                          innehållande tvättad artdata.
+    """
+
     if cfg["cache_obs"].exists():
         print(f"[Cache] Laddar observationer från {cfg['cache_obs'].name}...")
         return gpd.read_parquet(cfg["cache_obs"])
@@ -77,24 +93,36 @@ def load_observations(cfg):
         if combined_df[col].dtype == 'object' and col != 'geometry':
             combined_df[col] = combined_df[col].astype(str).replace('nan', '')
 
-    gdf = gpd.GeoDataFrame(
+    gdf_obs = gpd.GeoDataFrame(
         combined_df, 
         geometry=gpd.points_from_xy(combined_df.Ost, combined_df.Nord), 
         crs=cfg["crs"]
     )
     
     try:
-        gdf.to_parquet(cfg["cache_obs"])
-        print(f" -> Cache skapad: {len(gdf)} observationer.")
+        gdf_obs.to_parquet(cfg["cache_obs"])
+        print(f" -> Cache skapad: {len(gdf_obs)} observationer.")
     except Exception as e:
         print(f"[Varning] Kunde inte spara cache (kör vidare ändå): {e}")
         
-    return gdf
+    return gdf_obs
 
 def load_filtered_logging(cfg, bbox, start_year):
+    """
+    Läser in avverkningsskikt begränsat till ett geografiskt område och tidsspann.
+    
+    Args:
+        cfg (dict): Konfigurations-dictionary.
+        bbox (tuple): Geografisk begränsning (minx, miny, maxx, maxy).
+        start_year (int): Det tidigaste året som ska inkluderas i analysen.
+        
+    Returns:
+        dict: En dictionary där nycklarna är lagernamn ('utford' och 'anmäld') och 
+              värdena är GeoDataFrames med polygoner.
+    """
     logging_data = {}
     
-    for key, filename in cfg["layers"].items():
+    for key, filename in cfg["layers"].items(): # utförd och anmäld
         cache_path = cfg["cache_layers"][key]
         
         # Om vi laddar från cache, har vi redan filtrerat (eller så filtrerar vi igen för säkerhets skull)
@@ -128,21 +156,31 @@ def load_filtered_logging(cfg, bbox, start_year):
         
     return logging_data
 
-# --- 3. ANALYSDEL ---
-def run_spatial_analysis(gdf_obs, logging_layers):
+
+def run_spatial_analysis(gdf_obs, logging_data):
+    """
+    Korsar artpunkter med avverkningspolygoner geografiskt.
+    
+    Args:
+        gdf_obs (gpd.GeoDataFrame): GeoDataFrame med artpunkter.
+        logging_data (dict): Dictionary med GeoDataFrames för avverkning.
+        
+    Returns:
+        dict: Resultat per lager innehållande 'matches' (GeoDataFrame med träffar)
+              och 'total_relevant_count' (int).
+    """
     results = {}
     
     # Skapa en solid yta (gummiband) runt alla observationer
-    # Detta rensar bort "hörnen" från BBOX och områden utanför länet
     study_area_mask = gdf_obs.union_all().convex_hull.buffer(50)
     
-    # Skapa 50m buffert för själva träff-analysen
+    # Skapa 50m buffert runt alla observationer för själva träff-analysen
     gdf_obs_buffered = gdf_obs.copy()
     gdf_obs_buffered['geometry'] = gdf_obs_buffered.geometry.buffer(50)
     
-    for key, gdf_logging in logging_layers.items():
-        # --- GEOGRAFISKT FILTER ---
-        # Vi behåller endast avverkningar som nuddar vårt studieområde
+    for key, gdf_logging in logging_data.items():
+
+        # Behåll endast avverkningar som nuddar studieområdet
         relevant_logging = gdf_logging[gdf_logging.intersects(study_area_mask)].copy()
         
         print(f"[Analys] Matchar mot {len(relevant_logging)} relevanta områden i {key}...")
@@ -168,9 +206,19 @@ def run_spatial_analysis(gdf_obs, logging_layers):
     return results
 
 
-
-# --- 4. DESCRIBE/EXPORT ---
-def describe_and_save(gdf_obs, results, logging_layers, cfg):
+def describe_and_save(gdf_obs, results, logging_data, cfg):
+    """
+    Sammanställer analysen i terminalen och sparar detaljer till Excel.
+    
+    Args:
+        gdf_obs (gpd.GeoDataFrame): Den ursprungliga artdatan.
+        results (dict): Resultat-dict från run_spatial_analysis().
+        logging_data (dict): Inlästa avverkningar.
+        cfg (dict): Konfigurations-dictionary.
+        
+    Returns:
+        None: Funktionen skriver ut till terminalen och sparar en fil på hårddisken.
+    """
     # 1. Arter
     arter = ", ".join(gdf_obs['Artnamn'].unique())
     
@@ -178,7 +226,7 @@ def describe_and_save(gdf_obs, results, logging_layers, cfg):
     obs_dates = pd.to_datetime(gdf_obs['Startdatum'], errors='coerce')
     obs_min, obs_max = int(obs_dates.min().year), int(obs_dates.max().year)
     
-    # 3. Geografi
+    # 3. Geografi - Län
     unika_lan = gdf_obs['Län'].dropna().unique() if 'Län' in gdf_obs.columns else []
     lan_info = ", ".join(unika_lan) if len(unika_lan) > 0 else "Okänt område"
 
@@ -190,16 +238,16 @@ def describe_and_save(gdf_obs, results, logging_layers, cfg):
     print("="*70 + "\n")
 
     for key in ["utford", "anmald"]:
-        # Hämta data från den nya strukturen
+        # Hämta data från results
         analysis_data = results.get(key, {'matches': pd.DataFrame(), 'total_in_area': 0})
         res_df = analysis_data['matches']
         total_relevant = analysis_data.get('total_relevant_count', 0)
 
-        layer_df = logging_layers.get(key, pd.DataFrame())
+        layer_df = logging_data.get(key, pd.DataFrame())
         
         layer_full_name = "UTFÖRDA AVVERKNINGAR" if key == "utford" else "ANMÄLDA AVVERKNINGAR"
         
-        # Datumhantering (vi hämtar från res_df eller config om vi vill ha intervall)
+        # Datumhantering 
         date_col = 'Avvdatum' if key == 'utford' else 'Inkomdatum'
         date_info = ""
         if not layer_df.empty and date_col in layer_df.columns:
@@ -227,7 +275,6 @@ def describe_and_save(gdf_obs, results, logging_layers, cfg):
         print(f"    - TOTALT berörda områden:                    {len(all_affected_areas)} st utav {total_relevant} ({andel_omraden:.1f}%)")
         print()
 
-    # Slutsats
     all_dfs = [results[k]['matches'] for k in results]
     all_affected_idx = pd.concat(all_dfs).index.unique()
     
@@ -243,22 +290,19 @@ def describe_and_save(gdf_obs, results, logging_layers, cfg):
             if not df.empty:
                 df.drop(columns='geometry').to_excel(writer, sheet_name=f'Träffar_{key}', index=False)
 
-# --- MAIN ---
+
+
 if __name__ == "__main__":
-    config = get_config()
+    cfg = get_config()   # Definierar sökvägar och parametrar
     
-    knarot_gdf = load_observations(config)
+    gdf_obs = load_observations(cfg)  # Laddar artdata till geo_dataframe
     
-    # BBOX för att hantera 8GB-filen
-    obs_dates = pd.to_datetime(knarot_gdf['Startdatum'], errors='coerce')
+        # Ladda bara de avverkningar som är aktuella, med startår och BBOX som filter
+    obs_dates = pd.to_datetime(gdf_obs['Startdatum'], errors='coerce')
     start_year = int(obs_dates.min().year)
-    boundary = tuple(knarot_gdf.total_bounds)
+    boundary = tuple(gdf_obs.total_bounds)   
+    logging_data = load_filtered_logging(cfg, boundary, start_year)
     
-    # Ladda avverkningar med startår som filter
-    layers = load_filtered_logging(config, boundary, start_year)
+    analysis_results = run_spatial_analysis(gdf_obs, logging_data)
     
-    # Analys
-    analysis_results = run_spatial_analysis(knarot_gdf, layers)
-    
-    # Resultat och utskrift
-    describe_and_save(knarot_gdf, analysis_results, layers, config)
+    describe_and_save(gdf_obs, analysis_results, logging_data, cfg)
