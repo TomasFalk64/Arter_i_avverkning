@@ -34,15 +34,17 @@ Bearbetad data sparas som `.parquet`-filer i mappen `processed/` för att snabba
 5. Kör skriptet och granska resultatet i monitorn och `processed/Art_analys_resultat.xlsx`.
 
 # Filstruktur
-.
-├── Arter_i_avverkning.py   # Huvudkod
-├── sksUtfordAvverk.gpkg    # Geodata (input)
-├── sksAvverkAnm.gpkg       # Geodata (input)
-├── [Art-filer].xlsx        # Artportalen-data (input)
-└── processed/              # Resultat och cache (auto-genereras)
+
+```
+├── Arter_i_avverkning.py  
+├───in_data
+│   ├─── excelfil
+│   ├─── sksAvverkAnm.gpkg
+│   └─── sksUtfordAvverk.gpkg
+└───out_data             
     ├── Art_cache.parquet
     └── Art_analys_resultat.xlsx
-
+```
 
 # Licence 
 Detta repository är licensierat under MIT open license
