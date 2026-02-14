@@ -44,6 +44,7 @@ Bearbetad data sparas som `.parquet`-filer i mappen `processed/` för att snabba
     └── Art_analys_resultat.xlsx
 
 
-
+# Licence 
+Detta repository är licensierat under MIT open license
 
 
